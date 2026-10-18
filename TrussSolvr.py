@@ -60,6 +60,15 @@ def plot_truss(nodes, elements, title="Bridge Blueprint"):
     plt.axis('equal')
     plt.show()
 
+def physic_slv(nodes, elements, load_force, EA=100):
+    node_num = len(nodes)
+    degrees_of_freedom = 2*node_num  # Each node has 2 DOF (x and y)
+    K_global = np.zeros((degrees_of_freedom, degrees_of_freedom)) # Blank global stiffness matrix
+
+
+
+
+
 
 if __name__ == "__main__":
     nodes, elements = create_sample_truss()
