@@ -1,7 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-def create_sample_truss():
+def create_truss():
     """
     Creates a basic truss layout (similar to a Warren truss framework) 
     using coordinates scaled for standard popsicle sticks (~4.5 inches long).
@@ -39,7 +39,7 @@ def plot_truss(nodes, elements, title="Bridge Blueprint"):
     """
     plt.figure(figsize=(10, 4))
     
-    # Plot each element (popsicle stick)
+    # Plot one member
     for idx, (n1, n2) in enumerate(elements):
         p1 = nodes[n1]
         p2 = nodes[n2]
@@ -61,16 +61,89 @@ def plot_truss(nodes, elements, title="Bridge Blueprint"):
     plt.show()
 
 def physic_slv(nodes, elements, load_force, EA=100):
-    node_num = len(nodes)
-    degrees_of_freedom = 2*node_num  # Each node has 2 DOF (x and y)
-    K_global = np.zeros((degrees_of_freedom, degrees_of_freedom)) # Blank global stiffness matrix
+    num_nodes = len(nodes)
+    num_dofs = 2*num_nodes 
+    K_global = np.zeros((num_dofs, num_dofs)) # Blank global stiffness matrix
+    for n1, n2 in elements:
+        p1, p2 = nodes[n1], nodes[n2]
+        L = np.linalg.norm(p2 - p1)
+        if L == 0: continue
+        c = (p2[0] - p1[0]) / L
+        s = (p2[1] - p1[1]) / L
+        
+        k_local = (EA / L) * np.array([
+            [ c*c,  c*s, -c*c, -c*s],
+            [ c*s,  s*s, -c*s, -s*s],
+            [-c*c, -c*s,  c*c,  c*s],
+            [-c*s, -s*s,  c*s,  s*s]
+        ])
+        
+        dofs = [2*n1, 2*n1+1, 2*n2, 2*n2+1]
+        for i in range(4):
+            for j in range(4):
+                K_global[dofs[i], dofs[j]] += k_local[i, j]
 
+    # Apply Loads & Boundary Conditions (Pin left, roller right)
+    F = np.zeros(num_dofs)
+    # Find center node dynamically or assume index
+    center_node = len(nodes) // 2
+    F[2 * center_node + 1] = load_force
 
+    constrained_dofs = [0, 1, 2*(num_nodes-1) + 1] # Left pinned (x,y), Right roller (y)
+    free_dofs = [i for i in range(num_dofs) if i not in constrained_dofs]
 
+    # Solve F = K * u
+    K_ff = K_global[np.ix_(free_dofs, free_dofs)]
+    F_f = F[free_dofs]
+    
+    try:
+        u_free = np.linalg.solve(K_ff, F_f)
+    except np.linalg.LinAlgError:
+        return None, None # Structure is unstable / collapses mathematically
 
+    u = np.zeros(num_dofs)
+    u[free_dofs] = u_free
 
+    # Calculate Internal Forces
+    member_forces = []
+    for n1, n2 in elements:
+        p1, p2 = nodes[n1], nodes[n2]
+        L = np.linalg.norm(p2 - p1)
+        c = (p2[0] - p1[0]) / L
+        s = (p2[1] - p1[1]) / L
+        u_element = np.array([u[2*n1], u[2*n1+1], u[2*n2], u[2*n2+1]])
+        force = (EA / L) * np.dot(np.array([-c, -s, c, s]), u_element)
+        member_forces.append(force)
+
+    return member_forces, u
+
+def evaluate_bridge(nodes, elements, load_force, max_allowable_stress=500.0):
+    """
+    Step 2: The Evaluator / Fitness Function
+    Checks if the bridge breaks under load and calculates total material mass.
+    """
+    # 1. Calculate total length (proportional to mass)
+    total_mass = sum(np.linalg.norm(nodes[n2] - nodes[n1]) for n1, n2 in elements)
+    
+    # 2. Run physics solver
+    forces, displacements = physic_slv(nodes, elements, load_force)
+    
+    if forces is None:
+        return 999999.0 # Penalty score for unstable geometry
+        
+    # 3. Check for structural failure (Stress / Buckling limit)
+    failure_penalty = 0.0
+    for force in forces:
+        if abs(force) > max_allowable_stress:
+            failure_penalty += 1000.0 # Heavy penalty if a stick breaks
+            
+    # 4. Final Fitness Score (Lower is better)
+    fitness_score = total_mass + failure_penalty
+    return fitness_score
 
 if __name__ == "__main__":
-    nodes, elements = create_sample_truss()
+    nodes, elements = create_truss()
     print(f"Truss created successfully with {len(nodes)} nodes and {len(elements)} members.")
-    plot_truss(nodes, elements, title="Initial Bridge Template (Warren-Style)")
+    
+    score = evaluate_bridge(nodes, elements, load_force=-50.0)
+    print(f"Fitness Score: {score:.2f}")
