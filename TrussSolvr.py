@@ -38,9 +38,10 @@ MAX_GRAPH_POINTS = 100
 
 # 6. Genetic Algorithm
 
-
-
-
+POPULATION_SIZE = 30
+NUM_GENERATIONS = 20
+MUTATION_RATE = 0.15
+MUTATION_STRENGTH = 0.3
 
 # ==============================================================================
 # DERIVED CONSTANTS
@@ -51,7 +52,6 @@ I_MOMENT = (
     STICK_WIDTH_IN * STICK_THICKNESS_IN**3 / 12.0 * STICKS_PER_MEMBER
 )
 EA = WOOD_MODULUS_PSI * AREA
-
 
 # ==============================================================================
 # CORE PHYSICS & SOLVER FUNCTIONS
@@ -369,6 +369,29 @@ def plot_marble_response(capacity, marble_weight):
     )
     fig.tight_layout()
     plt.show()
+
+
+
+# =============================================================================
+# GENETIC ALGORTIHM FUNCTIONS
+# =============================================================================
+
+def evaluate_fitness(nodes,elements):
+    if not check_connectivity(len(nodes), elements, SUPPORT_NODES):
+        return 999999.0
+    
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 if __name__ == "__main__":
