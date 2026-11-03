@@ -4,31 +4,58 @@ from collections import defaultdict
 import math
 
 
-## ROUGH ESTIMATE INPUTS
+# ==============================================================================
+# CONFIGURATION & CONSTANTS (Edit your parameters here!)
+# ==============================================================================
 
-# Geometry in this file is in inches; material properties use psi.
+# 1. Material Properties (Birch Wood)
 WOOD_MODULUS_PSI = 1_300_000.0
 ESTIMATED_TENSILE_STRENGTH_PSI = 8_000.0
+
+# 2. Cross-Section Dimensions & Assembly
 STICK_WIDTH_IN = 5.0 / 2.54
 STICK_THICKNESS_IN = 1.0 / 25.4
 STICKS_PER_MEMBER = 1
+
+# 3. Test Load & Marble Parameters
 MARBLE_MASS_GRAMS = 4.5
+TEST_MARBLE_COUNT = 50.0   # <-- Set your explicit test marble count here!
+# (Alternatively, you can test a direct force in lbf by setting test_load below)
+EXPLICIT_TEST_LOAD_LBF = None  # e.g., -25.0 if you want a direct 25 lbf push, or None to use marbles
+
+# 4. Physical & Environmental Constants
 GRAVITY_M_S2 = 9.80665
 NEWTONS_PER_LBF = 4.448221615
 SAFETY_FACTOR = 2.0
 EULER_EFFECTIVE_LENGTH_FACTOR = 1.0
 
-AREA = STICK_WIDTH_IN * STICK_THICKNESS_IN * STICKS_PER_MEMBER
-I_MOMENT = (
-    STICK_WIDTH_IN * STICK_THICKNESS_IN**3 / 12.0 * STICKS_PER_MEMBER
-)
-EA = WOOD_MODULUS_PSI * AREA
+# 5. Solver & Structural Node Mapping
 PINNED_SUPPORT_NODE = 0
 ROLLER_SUPPORT_NODE = 4
 SUPPORT_NODES = (PINNED_SUPPORT_NODE, ROLLER_SUPPORT_NODE)
 LOAD_NODE = 2
 MAX_GRAPH_POINTS = 100
 
+# 6. Genetic Algorithm
+
+
+
+
+
+# ==============================================================================
+# DERIVED CONSTANTS
+# ==============================================================================
+
+AREA = STICK_WIDTH_IN * STICK_THICKNESS_IN * STICKS_PER_MEMBER
+I_MOMENT = (
+    STICK_WIDTH_IN * STICK_THICKNESS_IN**3 / 12.0 * STICKS_PER_MEMBER
+)
+EA = WOOD_MODULUS_PSI * AREA
+
+
+# ==============================================================================
+# CORE PHYSICS & SOLVER FUNCTIONS
+# ==============================================================================
 
 def check_connectivity(num_nodes, elements, constrained_nodes):
     graph = defaultdict(list)
@@ -120,7 +147,7 @@ def plot_stress_graph(
     if applied_load is not None:
         load_x, load_y = nodes[LOAD_NODE]
         plt.annotate(
-            f"{applied_load:.2f} lbf downward",
+            f"{abs(applied_load):.2f} lbf downward",
             xy=(load_x, load_y),
             xytext=(load_x, load_y + 1.0),
             ha='center',
@@ -129,7 +156,7 @@ def plot_stress_graph(
             weight='bold',
             zorder=5,
         )
-        support_reaction = applied_load / 2.0
+        support_reaction = abs(applied_load) / 2.0
         for support_node in SUPPORT_NODES:
             support_x, support_y = nodes[support_node]
             plt.annotate(
@@ -345,52 +372,50 @@ def plot_marble_response(capacity, marble_weight):
 
 
 if __name__ == "__main__":
+    import sys
     nodes, elements = create_truss()
-
     marble_weight = marble_weight_lbf()
-    capacity = find_estimated_capacity(nodes, elements)
 
-    if capacity is None:
-        print("Structure failed")
+    # Determine test load from top configuration variables
+    if EXPLICIT_TEST_LOAD_LBF is not None:
+        test_load_lbf = EXPLICIT_TEST_LOAD_LBF
+        print(f"Running simulation with explicit test load: {test_load_lbf} lbf")
     else:
-        capacity_lbf, limiting_member, limiting_mode, unit_deflection, unit_forces, lengths = capacity
-        capacity_marbles = capacity_lbf / marble_weight
-        safe_whole_marbles = math.floor(capacity_marbles)
-        print(f"Estimated marble weight: {marble_weight:.4f} lbf each")
-        print(
-            f"Estimated maximum threshold: {capacity_lbf:.3f} lbf "
-            f"({capacity_lbf * NEWTONS_PER_LBF:.2f} N, "
-            f"{capacity_lbf * NEWTONS_PER_LBF / GRAVITY_M_S2:.3f} kg equivalent)"
-        )
-        print(f"Equivalent marble threshold: {capacity_marbles:.2f} marbles")
-        print(
-            f"Whole-marble load not exceeding estimate: {safe_whole_marbles} "
-            f"marbles ({safe_whole_marbles * marble_weight:.3f} lbf)"
-        )
-        if limiting_member is not None:
-            print(
-                f"Limiting mode: {limiting_mode}, "
-                f"member {limiting_member + 1}"
-            )
-        print("Estimated member forces at the maximum threshold:")
-        for member_index, force_per_lbf in enumerate(unit_forces, start=1):
-            force = force_per_lbf * capacity_lbf
-            state = "tension" if force > 0 else "compression"
-            print(f"  Member {member_index:2d}: {abs(force):8.3f} lbf {state}")
-        print(
-            f"Predicted center deflection at {safe_whole_marbles} marbles: "
-            f"{abs(unit_deflection) * safe_whole_marbles * marble_weight:.4f} in"
-        )
+        test_load_lbf = -(TEST_MARBLE_COUNT * marble_weight)
+        print(f"Running simulation with configured load: {TEST_MARBLE_COUNT} marbles ({abs(test_load_lbf):.3f} lbf)")
 
-        plot_marble_response(capacity, marble_weight)
-        threshold_forces = [
-            force_per_lbf * capacity_lbf for force_per_lbf in unit_forces
-        ]
-        plot_stress_graph(
-            nodes,
-            elements,
-            threshold_forces,
-            lengths,
-            title="Bridge member forces at the estimated maximum threshold",
-            applied_load=capacity_lbf,
-        )
+    # Run solver for the specific configured test load
+    forces, lengths, displacements = solve_truss(nodes, elements, test_load_lbf)
+
+    # Bulletproof check: if the solver failed, stop here cleanly
+    if forces is None or displacements is None:
+        print("Structure failed or stiffness matrix is singular under this load.")
+        sys.exit()
+
+    print(f"Estimated marble weight: {marble_weight:.4f} lbf each")
+    print(f"Total applied load: {abs(test_load_lbf):.3f} lbf ({abs(test_load_lbf) * NEWTONS_PER_LBF:.2f} N)")
+    
+    print("Member forces under test load:")
+    for idx, force in enumerate(forces, start=1):
+        state = "tension" if force > 0 else "compression"
+        print(f"  Member {idx:2d}: {abs(force):8.3f} lbf {state}")
+
+    center_deflection = displacements[2 * LOAD_NODE + 1]
+    print(f"Predicted center deflection: {abs(center_deflection):.4f} inches")
+
+    # Plot stress distribution for this exact test load configuration
+    plot_stress_graph(
+        nodes,
+        elements,
+        forces,
+        lengths,
+        title=f"Bridge member forces under {abs(test_load_lbf):.1f} lbf load",
+        applied_load=test_load_lbf,
+    )
+
+    
+    capacity = find_estimated_capacity(nodes, elements)
+    if capacity is not None:
+        capacity_lbf = capacity[0]
+        capacity_marbles = capacity_lbf / marble_weight
+        print(f"\n[Reference Limit] Maximum estimated bridge capacity: {capacity_lbf:.2f} lbf (~{capacity_marbles:.0f} marbles)")
