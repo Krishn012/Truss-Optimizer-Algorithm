@@ -19,9 +19,9 @@ STICKS_PER_MEMBER = 1
 
 # 3. Test Load & Marble Parameters
 MARBLE_MASS_GRAMS = 4.5
-TEST_MARBLE_COUNT = 50.0   
+TEST_MARBLE_COUNT = 500.0   
 
-EXPLICIT_TEST_LOAD_LBF = None 
+EXPLICIT_TEST_LOAD_LBF = None
 
 # 4. Physical & Environmental Constants
 GRAVITY_M_S2 = 9.80665
@@ -447,9 +447,6 @@ def find_estimated_capacity(nodes, elements):
     center_deflection_per_lbf = displacements[2 * LOAD_NODE + 1]
     return (
         lowest_capacity_lbf,
-        limiting_member,
-        limiting_mode,
-        center_deflection_per_lbf,
         forces,
         lengths,
     )
@@ -556,69 +553,192 @@ def plot_marble_response(capacity, marble_weight):
 # GENETIC ALGORITHM FUNCTIONS
 # =============================================================================
 
-def evaluate_fitness(nodes, elements):
+def check_segments_intersect(p1, p2, p3, p4):
+    """Returns True if line segment (p1, p2) and (p3, p4) intersect strictly in their interiors."""
+    def ccw(A, B, C):
+        return (C[1] - A[1]) * (B[0] - A[0]) > (B[1] - A[1]) * (C[0] - A[0])
     
-    top_xs = [nodes[i, 0] for i in range(5, len(nodes))]
-    if not all(top_xs[i] < top_xs[i+1] for i in range(len(top_xs) - 1)):
-        return 999999.0
+    # If they share an endpoint node, they are connected, not intersecting invalidly
+    if np.array_equal(p1, p3) or np.array_equal(p1, p4) or np.array_equal(p2, p3) or np.array_equal(p2, p4):
+        return False
 
+    return ccw(p1, p3, p4) != ccw(p2, p3, p4) and ccw(p1, p2, p3) != ccw(p1, p2, p4)
+
+def has_member_intersections(nodes, elements):
+    """Checks if any members cross each other in mid-air."""
+    for i in range(len(elements)):
+        for j in range(i + 1, len(elements)):
+            n1, n2 = elements[i]
+            n3, n4 = elements[j]
+            p1, p2 = nodes[n1], nodes[n2]
+            p3, p4 = nodes[n3], nodes[n4]
+            if check_segments_intersect(p1, p2, p3, p4):
+                return True
+    return False
+
+def get_candidate_connections(num_nodes):
+    """Generates all geometrically reasonable candidate connections between nodes."""
+    connections = []
+    # Always include bottom chord to maintain span continuity
+    bottom_chord = [(i, i+1) for i in range(4)]
+    connections.extend(bottom_chord)
+    
+    # Generate all possible cross-connections within a reasonable max length
+    for i in range(num_nodes):
+        for j in range(i + 1, num_nodes):
+            if (i, j) in connections:
+                continue
+            # Distance check to avoid building impossibly long single-stick members
+            # (Assuming max stick span limit ~6 inches)
+            # We will evaluate length dynamically in the loop
+            connections.append((i, j))
+    return connections
+
+def create_random_individual():
+    """Generates a perfectly symmetrical truss layout with mirrored nodes and elements."""
+    # Base nodes: 5 bottom chord nodes (0 to 4)
+    nodes = np.array([
+        [0.0, 0.0],   # Node 0: Pinned support
+        [3.5, 0.0],   # Node 1
+        [7.0, 0.0],   # Node 2: Load node
+        [10.5, 0.0],  # Node 3
+        [14.0, 0.0],  # Node 4: Roller support
+        [2.0, 2.5],   # Node 5: Left free node
+        [5.0, 3.0],   # Node 6: Left inner-top node
+        [9.0, 3.0],   # Node 7: Right inner-top node (Mirrored from 6)
+        [12.0, 2.5]   # Node 8: Right free node (Mirrored from 5)
+    ])
+    
+    # Randomize only the left side free nodes; mirror them to the right side
+    nodes[5, 0] = np.random.uniform(1.0, 3.2)
+    nodes[5, 1] = np.random.uniform(1.0, 4.0)
+    nodes[8, 0] = 14.0 - nodes[5, 0]
+    nodes[8, 1] = nodes[5, 1]
+    
+    nodes[6, 0] = np.random.uniform(4.0, 6.5)
+    nodes[6, 1] = np.random.uniform(1.5, 4.2)
+    nodes[7, 0] = 14.0 - nodes[6, 0]
+    nodes[7, 1] = nodes[6, 1]
+    
+    optional_pairs = [((0, 5), (4, 8)), ((1, 5), (3, 8)), ((1, 6), (3, 7)), ((2, 6), (2, 7)), ((5, 6), (7, 8))]
+    active_elements = [(0,1), (1,2), (2,3), (3,4)] 
+    
+    for left_edge, right_edge in optional_pairs:
+        if np.random.rand() < 0.75: 
+            active_elements.append(left_edge)
+            active_elements.append(right_edge)
+            
+    if np.random.rand() < 0.5:
+        active_elements.append((6, 7)) 
+        
+    return nodes, active_elements
+
+def evaluate_fitness(nodes, elements):
+   
     if not check_connectivity(len(nodes), elements, SUPPORT_NODES):
+        return 999999.0
+        
+    
+    if has_member_intersections(nodes, elements):
         return 999999.0
         
     capacity_res = find_estimated_capacity(nodes, elements)
     if capacity_res is None:
         return 999999.0
         
-    capacity_lbf, limiting_member, limiting_mode, unit_deflection, forces, lengths = capacity_res
+    capacity_lbf,forces, lengths = capacity_res
     
-    total_mass = sum(lengths)
     target_load_lbf = TEST_MARBLE_COUNT * marble_weight_lbf()
+    total_mass = sum(lengths)
+    
     
     capacity_penalty = 0.0
     if capacity_lbf < target_load_lbf:
-        capacity_penalty = (target_load_lbf - capacity_lbf) * 200.0
+       
+        capacity_penalty = ((target_load_lbf - capacity_lbf) ** 1.5) * 1000.0
         
-    return total_mass + capacity_penalty
-
-
-def create_random_individual():
+    
+    member_count_tax = len(elements) * 4.0
+    
    
-    nodes, elements = create_truss()
-    base_x = [2.0, 5.0, 9.0, 12.0]
-    for idx, i in enumerate(range(5, len(nodes))):
-        nodes[i, 1] = np.random.uniform(1.2, 4.0)
-        nodes[i, 0] = base_x[idx] + np.random.uniform(-0.6, 0.6)
-    return nodes, elements
+    underutilized_penalty = sum(80.0 for f in forces if abs(f) < 1.0)
+    
+    
+    safety_margin = max(capacity_lbf / target_load_lbf, 0.1)
+    efficiency_score = total_mass / (safety_margin ** 0.5)
+    
+    return efficiency_score + capacity_penalty + member_count_tax + underutilized_penalty
 
-
-def mutate(nodes):
-   
+def mutate(nodes_and_elements):
+    nodes, elements = nodes_and_elements
     mutated_nodes = nodes.copy()
-    for i in range(5, len(mutated_nodes)):
-        if np.random.rand() < MUTATION_RATE:
-            mutated_nodes[i, 1] += np.random.normal(0, 0.3)
-            mutated_nodes[i, 0] += np.random.normal(0, 0.3)
-            
-            mutated_nodes[i, 1] = np.clip(mutated_nodes[i, 1], 1.0, 4.5)
-            
-            mutated_nodes[i, 0] = np.clip(mutated_nodes[i, 0], 0.5, 13.5)
-            
-    return mutated_nodes
-
-
-def crossover(parent1_nodes, parent2_nodes):
+    mutated_elements = list(elements)
+    
+    
+    if np.random.rand() < MUTATION_RATE:
+        mutated_nodes[5, 1] += np.random.normal(0, 0.3)
+        mutated_nodes[5, 0] += np.random.normal(0, 0.3)
+        mutated_nodes[5, 1] = np.clip(mutated_nodes[5, 1], 0.8, 4.5)
+        mutated_nodes[5, 0] = np.clip(mutated_nodes[5, 0], 0.8, 3.4)
+       
+        nodes[8, 0] = 14.0 - nodes[5, 0]
+        nodes[8, 1] = nodes[5, 1]
+        
+    if np.random.rand() < MUTATION_RATE:
+        mutated_nodes[6, 1] += np.random.normal(0, 0.3)
+        mutated_nodes[6, 0] += np.random.normal(0, 0.3)
+        mutated_nodes[6, 1] = np.clip(mutated_nodes[6, 1], 1.0, 4.5)
+        mutated_nodes[6, 0] = np.clip(mutated_nodes[6, 0], 3.8, 6.6)
+       
+        nodes[7, 0] = 14.0 - nodes[6, 0]
+        nodes[7, 1] = nodes[6, 1]
+        
    
-    child_nodes = parent1_nodes.copy()
-    for i in range(len(child_nodes)):
-        if np.random.rand() > 0.5:
-            child_nodes[i] = parent2_nodes[i]
-    _, elements = create_truss()
-    return child_nodes, elements
+    symmetric_pairs = [((0, 5), (4, 8)), ((1, 5), (3, 8)), ((1, 6), (3, 7)), ((2, 6), (2, 7)), ((5, 6), (7, 8))]
+    for left_edge, right_edge in symmetric_pairs:
+        if np.random.rand() < 0.12:
+            has_left = left_edge in mutated_elements
+            if has_left:
+                if left_edge in mutated_elements: mutated_elements.remove(left_edge)
+                if right_edge in mutated_elements: mutated_elements.remove(right_edge)
+            else:
+                mutated_elements.append(left_edge)
+                mutated_elements.append(right_edge)
+                
+    return mutated_nodes, mutated_elements
 
+def crossover(parent1, parent2):
+    p1_nodes, p1_elements = parent1
+    p2_nodes, p2_elements = parent2
+    
+    child_nodes = p1_nodes.copy()
+    
+    if np.random.rand() > 0.5:
+        child_nodes[5] = p2_nodes[5].copy()
+        child_nodes[6] = p2_nodes[6].copy()
+        # Re-mirror right side
+        child_nodes[8, 0] = 14.0 - child_nodes[5, 0]
+        child_nodes[8, 1] = child_nodes[5, 1]
+        child_nodes[7, 0] = 14.0 - child_nodes[6, 0]
+        child_nodes[7, 1] = child_nodes[6, 1]
+        
+    
+    child_elements = [(0,1), (1,2), (2,3), (3,4)]
+    all_pairs = [((0, 5), (4, 8)), ((1, 5), (3, 8)), ((1, 6), (3, 7)), ((2, 6), (2, 7)), ((5, 6), (7, 8))]
+    
+    for left_edge, right_edge in all_pairs:
+        in_p1 = left_edge in p1_elements
+        in_p2 = left_edge in p2_elements
+        if in_p1 and in_p2:
+            child_elements.append(left_edge)
+            child_elements.append(right_edge)
+        elif (in_p1 or in_p2) and np.random.rand() < 0.5:
+            child_elements.append(left_edge)
+            child_elements.append(right_edge)
+            
+    return child_nodes, child_elements
 
 def run_genetic_algorithm():
-    
-    
     population = [create_random_individual() for _ in range(POPULATION_SIZE)]
     
     best_overall_nodes = None
@@ -637,12 +757,12 @@ def run_genetic_algorithm():
         if gen_best_fitness < best_overall_fitness:
             best_overall_fitness = gen_best_fitness
             best_overall_nodes = gen_best_nodes.copy()
-            best_overall_elements = gen_best_elements
+            best_overall_elements = list(gen_best_elements)
             
-        print(f"Generation {generation + 1:2d} | Best Fitness Score: {gen_best_fitness:.2f}")
+        print(f"Generation {generation + 1:2d} | Best Fitness Score: {gen_best_fitness:.2f} | Members: {len(gen_best_elements)}")
         
         survivor_count = max(2, int(POPULATION_SIZE * 0.3))
-        survivors = [item[1:] for item in scored_population[:survivor_count]]
+        survivors = [(item[1], item[2]) for item in scored_population[:survivor_count]]
         
         next_generation = list(survivors)
         
@@ -650,8 +770,8 @@ def run_genetic_algorithm():
             p1 = survivors[np.random.choice(len(survivors))]
             p2 = survivors[np.random.choice(len(survivors))]
             
-            child_nodes, child_elements = crossover(p1[0], p2[0])
-            child_nodes = mutate(child_nodes)
+            child_nodes, child_elements = crossover(p1, p2)
+            child_nodes, child_elements = mutate((child_nodes, child_elements))
             next_generation.append((child_nodes, child_elements))
             
         population = next_generation
