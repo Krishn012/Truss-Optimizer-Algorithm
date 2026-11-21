@@ -16,6 +16,7 @@ ESTIMATED_TENSILE_STRENGTH_PSI = 8_000.0
 STICK_WIDTH_IN = 5.0 / 2.54
 STICK_THICKNESS_IN = 1.0 / 25.4
 STICKS_PER_MEMBER = 1
+MAX_STICK_LENGTH_IN = 4.5
 
 # 3. Test Load & Marble Parameters
 MARBLE_MASS_GRAMS = 4.5
@@ -42,6 +43,7 @@ POPULATION_SIZE = 30
 NUM_GENERATIONS = 20
 MUTATION_RATE = 0.15
 MUTATION_STRENGTH = 0.3
+RANDOM_SEED = 11
 
 # ==============================================================================
 # DERIVED CONSTANTS
@@ -647,6 +649,9 @@ def evaluate_fitness(nodes, elements):
         return 999999.0
         
     capacity_lbf,forces, lengths = capacity_res
+
+    if any(L > MAX_STICK_LENGTH_IN for L in lengths):
+        return 999999.0
     
     target_load_lbf = TEST_MARBLE_COUNT * marble_weight_lbf()
     total_mass = sum(lengths)
@@ -738,7 +743,10 @@ def crossover(parent1, parent2):
             
     return child_nodes, child_elements
 
-def run_genetic_algorithm():
+def run_genetic_algorithm(seed=RANDOM_SEED):
+    if seed is not None:
+        np.random.seed(seed)
+
     population = [create_random_individual() for _ in range(POPULATION_SIZE)]
     
     best_overall_nodes = None
