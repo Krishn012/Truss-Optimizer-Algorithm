@@ -19,8 +19,8 @@ STICKS_PER_MEMBER = 1
 MAX_STICK_LENGTH_IN = 4.5
 
 # 3. Test Load & Marble Parameters
-MARBLE_MASS_GRAMS = 4.5
-TEST_MARBLE_COUNT = 500.0   
+WEIGHT_MASS_GRAMS = 4.5
+TEST_WEIGHT_COUNT = 500.0   
 
 EXPLICIT_TEST_LOAD_LBF = None
 
@@ -455,7 +455,7 @@ def find_estimated_capacity(nodes, elements):
 
 
 def marble_weight_lbf():
-    mass_kg = MARBLE_MASS_GRAMS / 1000.0
+    mass_kg = WEIGHT_MASS_GRAMS / 1000.0
     return mass_kg * GRAVITY_M_S2 / NEWTONS_PER_LBF
 
 def print_member_geometry(nodes, elements):
@@ -653,7 +653,7 @@ def evaluate_fitness(nodes, elements):
     if any(L > MAX_STICK_LENGTH_IN for L in lengths):
         return 999999.0
     
-    target_load_lbf = TEST_MARBLE_COUNT * marble_weight_lbf()
+    target_load_lbf = TEST_WEIGHT_COUNT * marble_weight_lbf()
     total_mass = sum(lengths)
     
     
@@ -811,8 +811,8 @@ if __name__ == "__main__":
         test_load_lbf = EXPLICIT_TEST_LOAD_LBF
         print(f"\nRunning simulation with explicit test load: {test_load_lbf} lbf")
     else:
-        test_load_lbf = -(TEST_MARBLE_COUNT * marble_weight)
-        print(f"\nRunning simulation with configured load: {TEST_MARBLE_COUNT} marbles ({abs(test_load_lbf):.3f} lbf)")
+        test_load_lbf = -(TEST_WEIGHT_COUNT * marble_weight)
+        print(f"\nRunning simulation with configured load: {TEST_WEIGHT_COUNT} marbles ({abs(test_load_lbf):.3f} lbf)")
 
     
     forces, lengths, displacements = solve_truss(opt_nodes, opt_elements, test_load_lbf)
