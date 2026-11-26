@@ -22,3 +22,9 @@ TEST_MARBLE_COUNT = 500.0 (MARBLE_MASS_GRAMS = 4.5) — target load
 WOOD_MODULUS_PSI, ESTIMATED_TENSILE_STRENGTH_PSI, STICK_WIDTH_IN, STICK_THICKNESS_IN, SAFETY_FACTOR — material & build specs. Change for different materials.
 
 POPULATION_SIZE, NUM_GENERATIONS, MUTATION_RATE, MUTATION_STRENGTH — GA controls, used in this program as estabilished defaults. Not recommendable to change.
+
+Note: Gusset plates are also included in the schematic, one for each node. Not diagrammed due to redundancy.
+
+Example Graph:
+
+![An optimized schematic](images/Seed8.png)
